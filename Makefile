@@ -9,9 +9,4 @@ app_eqc: app
 CT_SUITES = fuse
 PLT_APPS = sasl
 
-# Dependencies
-DEPS = folsom bear
-dep_folsom = https://github.com/boundary/folsom.git
-dep_bear = https://github.com/boundary/bear.git
-
 include erlang.mk

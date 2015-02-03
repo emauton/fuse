@@ -11,7 +11,8 @@
 	install/2,
 	melt/1,
 	reset/1,
-	run/3
+	run/3,
+	stats/1
 ]).
 
 -type fuse_context() :: sync | async_dirty.
@@ -68,6 +69,18 @@ reset(Name) ->
   when Name :: atom().
 melt(Name) ->
 	fuse_server:melt(Name).
+
+%% @doc stats/1 returns statistics for the given fuse
+%% Three counters: ok, melt and blown. The ok and blown metrics are
+%% increased on every ask/2 call to the fuse. The melt metric is
+%% increased whenever we see a melt happen.
+%% @end
+-spec stats(Name) -> [Stat]
+  when
+    Name :: atom(),
+    Stat :: { ok | blown | melt, non_neg_integer()}.
+stats(Name) ->
+    fuse_server:stats(Name).
 
 %% Internal functions
 %% -----------------------

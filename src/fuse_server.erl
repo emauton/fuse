@@ -17,7 +17,8 @@
     install/2,
     melt/1,
     reset/1,
-    run/3]).
+    run/3,
+    stats/1]).
 
 %% Callbacks
 -export([code_change/3, handle_call/3, handle_cast/2, handle_info/2, init/1, terminate/2]).
@@ -26,6 +27,7 @@
 -export([sync/0, q_melts/0]).
 
 -define(TAB, fuse_state).
+-define(STATS, fuse_statistics).
 
 -record(state, { fuses = [] }).
 -record(fuse, {
@@ -75,10 +77,10 @@ ask(Name, async_dirty) -> ask_(Name).
 ask_(Name) ->
     try ets:lookup_element(?TAB, Name, 2) of
         ok ->
-          _ = folsom_metrics:notify({metric(Name, <<"ok">>), 1}),
+          _ = ets:update_counter(?STATS, metric(Name, ok), 1),
           ok;
         blown ->
-          _ = folsom_metrics:notify({metric(Name, <<"blown">>), 1}),
+          _ = ets:update_counter(?STATS, metric(Name, blown), 1),
           blown
     catch
         error:badarg ->
@@ -130,9 +132,21 @@ run(Name, Func, Context) ->
           {error, Reason}
     end.
 
+%% @doc stats/1 returns statistics for the given fuse
+%% For documentation, (@see fuse:stats/1)
+%% @end
+-spec stats(Name) -> [Stat]
+  when
+    Name :: atom(),
+    Stat :: { ok | blown | melt, non_neg_integer()}.
+stats(Name) ->
+    [{Stat, ets:lookup_element(?STATS, metric(Name, Stat), 2)} ||
+        Stat <- [ok, blown, melt]].
+
 %% @private
 init([]) ->
 	_ = ets:new(?TAB, [named_table, protected, set, {read_concurrency, true}, {keypos, 1}]),
+	_ = ets:new(?STATS, [named_table, public, set, {write_concurrency, true}, {keypos, 1}]),
 	{ok, #state{ }}.
 
 %% @private
@@ -155,7 +169,7 @@ handle_call({melt, Name}, _From, State) ->
 	{Res, State2} = with_fuse(Name, State, fun(F) -> add_restart(Now, F) end),
 	case Res of
 	  ok ->
-	    _ = folsom_metrics:notify({metric(Name, <<"melt">>), 1}),
+	    _ = ets:update_counter(?STATS, metric(Name, melt), 1),
 	    {reply, ok, State2};
 	  not_found -> {reply, ok, State2}
 	end;
@@ -269,14 +283,13 @@ fix(#fuse { name = Name }) ->
     ok.
 
 install_metrics(#fuse { name = N }) ->
-	_ = folsom_metrics:new_spiral(metric(N, <<"ok">>)),
-	_ = folsom_metrics:new_spiral(metric(N, <<"blown">>)),
-	_ = folsom_metrics:new_spiral(metric(N, <<"melt">>)),
-	ok.
+    true = ets:insert(?STATS, [{metric(N, ok), 0},
+                               {metric(N, blown), 0},
+                               {metric(N, melt), 0}]),
+    ok.
 
 metric(Name, What) ->
-	B = iolist_to_binary([atom_to_list(Name), $., What]),
-	binary_to_atom(B, utf8).
+    {stat, Name, What}.
 
 reset_timer(#fuse { timer_ref = none } = F) -> F;
 reset_timer(#fuse { timer_ref = TRef } = F) ->
